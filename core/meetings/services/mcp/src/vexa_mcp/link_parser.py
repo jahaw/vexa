@@ -30,6 +30,7 @@ _TEAMS_ENTERPRISE_HOSTS = {
     "teams.microsoft.com",
     "gov.teams.microsoft.us",
     "dod.teams.microsoft.us",
+    "teams.microsoftonline.cn",
 }
 
 
@@ -50,6 +51,7 @@ def _is_teams_enterprise_host(host: str) -> bool:
         host in _TEAMS_ENTERPRISE_HOSTS
         or _host_is(host, "teams.microsoft.us")
         or _host_is(host, "teams.microsoft.com")
+        or _host_is(host, "teams.microsoftonline.cn")
     )
 
 

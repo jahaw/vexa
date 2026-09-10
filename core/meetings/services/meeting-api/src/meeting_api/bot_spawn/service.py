@@ -137,7 +137,7 @@ _URL_TEMPLATES = {
 # stays on ``/l/meetup-join/``. Interpolating a SHORT id into that path builds
 # ``/l/meetup-join/397421056486982``: the wrong path for that id, and with nowhere for the
 # passcode to go (#892).
-_TEAMS_SHORT_ID = re.compile(r"^\d{10,15}$")
+_TEAMS_SHORT_ID = re.compile(r"^\d{10,17}$")
 
 #: Teams web-client host SUFFIXES a constructed URL may be built on — the same set the join
 #: layer recognizes as "this page IS Teams" (``join/src/msteams/auth-redirect.ts``
@@ -154,6 +154,7 @@ _TEAMS_HOST_SUFFIXES = (
     "teams.live.com",
     "teams.microsoft.us",
     "teams.cloud.microsoft",
+    "teams.microsoftonline.cn",
 )
 _TEAMS_DEFAULT_HOST = "teams.microsoft.com"
 

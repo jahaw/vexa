@@ -61,7 +61,7 @@ export interface JoinOptions {
 /** Infer the platform from the meeting URL. Throws on an unrecognized host. */
 export function resolvePlatform(meetingUrl: string): Platform {
   if (meetingUrl.includes("meet.google.com")) return "google_meet";
-  if (meetingUrl.includes("teams.microsoft.com") || meetingUrl.includes("teams.live.com")) return "teams";
+  if (meetingUrl.includes("teams.microsoft.com") || meetingUrl.includes("teams.live.com") || meetingUrl.includes("teams.microsoftonline.cn")) return "teams";
   // Canonical zoom.us / *.zoom.us only — white-label portals (LFX etc.) can't be
   // inferred from the URL; the embedder passes platform: "zoom" explicitly.
   // Same rule for Jitsi: only the canonical public deployments are inferable —

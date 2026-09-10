@@ -103,7 +103,7 @@ def parse_meeting_url(raw: str, *, generic_hosts: bool = True) -> Optional[tuple
         if "zoom" in host:
             m = _ZOOM_ID.search(parsed.path) or _ZOOM_ID.search(parsed.query)
             return ("zoom", m.group(0)) if m else None
-        if _host_is(host, "teams.microsoft.com") or _host_is(host, "teams.live.com"):
+        if _host_is(host, "teams.microsoft.com") or _host_is(host, "teams.live.com") or _host_is(host, "teams.microsoftonline.cn"):
             # Classic deep link carries the thread id (…/l/meetup-join/19:meeting_…@thread.v2).
             thread = _TEAMS_THREAD.search(unquote(value))
             if thread:

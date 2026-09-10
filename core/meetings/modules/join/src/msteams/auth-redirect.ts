@@ -48,6 +48,7 @@ const TEAMS_HOST_SUFFIXES = [
   "teams.live.com",
   "teams.microsoft.us",
   "teams.cloud.microsoft",
+  "teams.microsoftonline.cn",
 ];
 
 function hostOf(url: string): string | null {

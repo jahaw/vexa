@@ -58,7 +58,7 @@ export function parseMeetingInput(raw: string, jitsiHosts: readonly string[] = [
       const m = url.pathname.match(ZOOM_ID) || url.search.match(ZOOM_ID);
       return m ? { platform: "zoom", native_meeting_id: m[0] } : null;
     }
-    if (host.includes("teams.microsoft.com") || host.includes("teams.live.com")) {
+    if (host.includes("teams.microsoft.com") || host.includes("teams.live.com") || host.includes("teams.microsoftonline.cn")) {
       // Classic deep link carries the thread id (…/l/meetup-join/19:meeting_…@thread.v2).
       const decoded = decodeURIComponent(input);
       const thread = decoded.match(/19:meeting_[^@%\s/]+@thread\.v2/i);
