@@ -113,6 +113,29 @@ def test_create_requires_identity():
     assert client.post("/meetings", json={"title": "x"}).status_code == 401
 
 
+def test_create_persists_bot_name():
+    client, _store, _redis = _client()
+    r = client.post("/meetings", json={
+        "title": "Standup", "scheduled_at": AT, "bot_name": "  记录员  ",
+    }, headers=H)
+    assert r.status_code == 201, r.text
+    # stripped server-side; the auto-join sweep reads this key back at dispatch time
+    assert r.json()["data"]["bot_name"] == "记录员"
+
+
+def test_create_blank_bot_name_is_dropped():
+    client, _store, _redis = _client()
+    r = client.post("/meetings", json={"title": "x", "bot_name": "   "}, headers=H)
+    assert r.status_code == 201
+    assert "bot_name" not in r.json()["data"]
+
+
+def test_create_nonstring_bot_name_422():
+    client, _store, _redis = _client()
+    r = client.post("/meetings", json={"title": "x", "bot_name": 42}, headers=H)
+    assert r.status_code == 422
+
+
 # ---- patch --------------------------------------------------------------------------
 
 def test_patch_title_and_time():
@@ -158,6 +181,17 @@ def test_patch_workspace_bind_and_unbind():
                         headers=H).json()["data"]["workspace_id"] == "ws-9"
     row = client.patch(f"/meetings/{mid}", json={"workspace_id": None}, headers=H).json()
     assert "workspace_id" not in row["data"]
+
+
+def test_patch_bot_name_set_and_clear():
+    client, _store, _redis = _client()
+    mid = client.post("/meetings", json={"title": "x"}, headers=H).json()["id"]
+    row = client.patch(f"/meetings/{mid}", json={"bot_name": "Meeting Assistant"},
+                       headers=H).json()
+    assert row["data"]["bot_name"] == "Meeting Assistant"
+    # empty string clears a previously set name (same semantics as `title`)
+    row = client.patch(f"/meetings/{mid}", json={"bot_name": ""}, headers=H).json()
+    assert "bot_name" not in row["data"]
 
 
 def test_patch_fsm_row_409():

@@ -330,9 +330,14 @@ class InMemoryTranscriptStore:
                 "mode": mode, "expires_at": grant["expires_at"]}
 
     async def mint_transcript_share(self, user_id, platform, native_meeting_id, *,
-                                    mode="open", allowed_emails=None, expires_in_sec=86400):
-        return self._mint_share_on(self._find(user_id, platform, native_meeting_id),
-                                   mode, allowed_emails, expires_in_sec)
+                                    mode="open", allowed_emails=None, expires_in_sec=86400,
+                                    member_workspaces=None):
+        """Mirrors the SqlAlchemy store: resolve the row through the SAME three-way rule that
+        authorizes the transcript READ (owner / bound-workspace member / transcript viewer),
+        then mint the grant onto it."""
+        mid = await self.authorize_subscribe(user_id, platform, native_meeting_id,
+                                             member_workspaces=member_workspaces)
+        return self._mint_share_on(mid, mode, allowed_emails, expires_in_sec)
 
     async def mint_transcript_share_by_id(self, user_id, meeting_id, *,
                                           mode="open", allowed_emails=None, expires_in_sec=86400):
@@ -451,7 +456,8 @@ class InMemoryTranscriptStore:
 
     async def create_planned_meeting(self, user_id, *, platform, native_meeting_id,
                                      title=None, scheduled_at=None, meeting_url=None,
-                                     workspace_id=None, auto_join=True, calendar_uid=None,
+                                     workspace_id=None, auto_join=True, bot_name=None,
+                                     calendar_uid=None,
                                      calendar_source=None,
                                      workspace_source=None, attendees=None,
                                      auto_join_last_attempt=None,
@@ -461,6 +467,9 @@ class InMemoryTranscriptStore:
         data: dict = {"auto_join": bool(auto_join)}
         if title:
             data["title"] = title
+        if bot_name:
+            # keep in lockstep with the SQL adapter — the sweep reads this key
+            data["bot_name"] = bot_name
         if scheduled_at:
             data["scheduled_at"] = scheduled_at
         if meeting_url:
@@ -677,6 +686,12 @@ class InMemoryTranscriptStore:
                 data["auto_join_user_set"] = True
             else:
                 data.pop("auto_join_user_set", None)
+        if "bot_name" in updates:
+            # empty string clears a previously set name (same semantics as `title` above)
+            if updates["bot_name"]:
+                data["bot_name"] = updates["bot_name"]
+            else:
+                data.pop("bot_name", None)
         if "calendar_uid" in updates:
             if updates["calendar_uid"]:
                 data["calendar_uid"] = updates["calendar_uid"]

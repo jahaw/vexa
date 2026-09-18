@@ -192,6 +192,44 @@ def test_the_pair_route_still_mints():
     assert r.status_code == 200 and r.json()["token"].split(".")[0] == str(mid)
 
 
+def test_a_workspace_member_can_mint_on_the_pair_route():
+    """Mint follows the SAME three-way rule as the transcript READ (branch b): the Tab dashboard
+    opens the detail page for non-owner workspace members too, and the old owner-only mint 404'd
+    for exactly the users this feature exists to onboard."""
+    store = InMemoryTranscriptStore()
+    mid = store.seed_meeting(user_id=OWNER, platform=PLAT, native_meeting_id=NID,
+                             data={"workspace_id": "ws-shared"})
+    client = TestClient(create_app(store, redis=None))
+    r = client.post(f"/meetings/{PLAT}/{NID}/share", json={"mode": "open"},
+                    headers={"x-user-id": str(VISITOR), "x-user-workspaces": "ws-shared"})
+    assert r.status_code == 200 and r.json()["token"].split(".")[0] == str(mid)
+
+
+def test_a_transcript_viewer_can_mint_on_the_pair_route():
+    """Branch (c): someone who redeemed an earlier share link can re-share the same transcript
+    without ever being a workspace member."""
+    store = InMemoryTranscriptStore()
+    mid = store.seed_meeting(user_id=OWNER, platform=PLAT, native_meeting_id=NID,
+                             data={"transcript_viewers": [VISITOR]})
+    client = TestClient(create_app(store, redis=None))
+    r = client.post(f"/meetings/{PLAT}/{NID}/share", json={"mode": "open"},
+                    headers={"x-user-id": str(VISITOR)})
+    assert r.status_code == 200 and r.json()["token"].split(".")[0] == str(mid)
+
+
+def test_an_outsider_still_gets_404_on_the_pair_route():
+    """The widening must not leak existence: no ownership, no membership, no redeemed grant → 404,
+    and nothing is written to the row."""
+    store = InMemoryTranscriptStore()
+    mid = store.seed_meeting(user_id=OWNER, platform=PLAT, native_meeting_id=NID,
+                             data={"workspace_id": "ws-shared"})
+    client = TestClient(create_app(store, redis=None))
+    r = client.post(f"/meetings/{PLAT}/{NID}/share", json={"mode": "open"},
+                    headers={"x-user-id": str(OTHER), "x-user-workspaces": "ws-other-tenant"})
+    assert r.status_code == 404
+    assert store._meetings[mid]["data"].get("share_grants") in (None, [])
+
+
 def test_the_two_routes_do_not_shadow_each_other():
     """Segment count keeps them apart, and both are reachable in the same app. A row id and a
     platform name are never confused: `/meetings/{id}/share` is three segments, the pair route

@@ -380,7 +380,8 @@ def build_router(
     # `scheduled` (time given) or `idle`. A later POST /bots for the same (platform, native) CLAIMS the
     # row in place (bot_spawn.create_meeting_guarded), so the plan, its workspace bind, and the eventual
     # transcript share ONE row. Link-less plans use platform='unknown' + NULL native id and are addressed
-    # by ROW id (PATCH/DELETE below). ---
+    # by ROW id (PATCH/DELETE below). An optional `bot_name` names the bot the sweep will send at the
+    # scheduled time; absent/blank falls through to the user-wide default. ---
     # ── calendar sync, user-facing: immediate feedback for the "Connect your calendar" panel.
     #    GET  → the last sweep's stamp {last_sync, last_error, counts?} (or {} before any run).
     #    POST → run THIS user's fetch→parse→sync NOW and return the fresh stamp — pasting a feed
@@ -466,10 +467,18 @@ def build_router(
         if not isinstance(auto_join, bool):
             raise HTTPException(status_code=422, detail="'auto_join' must be a boolean")
 
+        # Optional caller-named bot (the tab's Plan Meeting form); the auto-join sweep reads it
+        # back off the row. Same normalization as `title`: strip, cap length, blank → None so an
+        # absent field and an empty one behave identically.
+        bot_name = payload.get("bot_name")
+        if bot_name is not None and not isinstance(bot_name, str):
+            raise HTTPException(status_code=422, detail="'bot_name' must be a string")
+        bot_name = (bot_name or "").strip()[:200] or None
+
         row = await store.create_planned_meeting(
             user_id, platform=platform, native_meeting_id=native_id,
             title=title, scheduled_at=scheduled_at, meeting_url=meeting_url,
-            workspace_id=workspace_id, auto_join=auto_join,
+            workspace_id=workspace_id, auto_join=auto_join, bot_name=bot_name,
         )
         if isinstance(row, dict) and row.get("error") == "duplicate":
             raise HTTPException(
@@ -551,6 +560,12 @@ def build_router(
             # A per-meeting choice, marked as the user's: calendar sync derives `auto_join` from
             # the connected calendars' policy on every pass, and stands down on a marked row.
             updates["auto_join_user_set"] = True
+        if "bot_name" in payload:
+            bot_name = payload["bot_name"]
+            if bot_name is not None and not isinstance(bot_name, str):
+                raise HTTPException(status_code=422, detail="'bot_name' must be a string")
+            # empty string clears a previously set name (same semantics as `title` above)
+            updates["bot_name"] = (bot_name or "").strip()[:200] or None
         if not updates:
             raise HTTPException(status_code=422, detail="no editable fields in body")
 
@@ -1044,18 +1059,25 @@ def build_router(
         return JSONResponse(content=minted)
 
     # --- POST /meetings/{platform}/{native_meeting_id}/share → mint an INDEPENDENT transcript share link
-    # (capability token). Owner-scoped. open|restricted(+allowed_emails), TTL. The token is returned ONCE
-    # (only its hash is stored). Redeemed at POST /transcripts/share/accept — NO workspace involved.
-    # Kept for 0.10 clients and the /transcripts/{platform}/{native}/share alias; new callers use the
-    # by-row-id route above, which can address rows this one cannot. ---
+    # (capability token). Authorized by the SAME three-way rule as the transcript READ (owner / member of
+    # the bound workspace via x-user-workspaces / redeemed transcript viewer): the Tab dashboard mints
+    # from the meeting detail page, where a non-owner workspace member legitimately lands, and the old
+    # owner-only mint 404'd for exactly those users. open|restricted(+allowed_emails), TTL. The token is
+    # returned ONCE (only its hash is stored). Redeemed at POST /transcripts/share/accept — NO workspace
+    # involved. Kept for 0.10 clients and the /transcripts/{platform}/{native}/share alias; new callers
+    # use the by-row-id route above, which can address rows this one cannot. ---
     @router.post("/meetings/{platform}/{native_meeting_id}/share")
     async def mint_transcript_share(
         platform: str,
         native_meeting_id: str,
         request: Request,
         x_user_id: Optional[str] = Header(default=None),
+        x_user_workspaces: Optional[str] = Header(default=None),
     ):
         user_id = _resolve_user_id(x_user_id)
+        # Same header contract as get_transcript_by_id / ws_authorize_subscribe: the comma-separated
+        # workspace ids the gateway resolved for this caller.
+        member_workspaces = {w.strip() for w in (x_user_workspaces or "").split(",") if w.strip()}
         try:
             payload = await request.json()
         except Exception:
@@ -1063,13 +1085,15 @@ def build_router(
         mode, emails, ttl = _share_payload(payload)
         minted = await store.mint_transcript_share(
             user_id, platform, native_meeting_id, mode=mode, allowed_emails=emails, expires_in_sec=ttl,
+            member_workspaces=member_workspaces,
         )
         if minted is None:
             log_event(
                 "transcript_share_mint_failed", audience="system", level="warning",
                 span="meetings.transcript.share", user_id=user_id,
                 meeting_id=f"{platform}/{native_meeting_id}",
-                fields={"mode": mode, "reason": "no meeting addressed by this (platform, native) pair"},
+                fields={"mode": mode,
+                        "reason": "no meeting the caller may read for this (platform, native) pair"},
             )
             raise HTTPException(status_code=404, detail=f"Meeting not found for {platform}/{native_meeting_id}")
         log_event("transcript_share_minted", audience="user", span="meetings.transcript.share",

@@ -36,7 +36,8 @@ def _schedule_schema() -> dict:
     for parent in Path(__file__).resolve().parents:
         candidate = parent / rel
         if candidate.is_file():
-            return json.loads(candidate.read_text())
+            # JSON spec mandates UTF-8; a bare read_text() picks up the OS locale (gbk on Windows).
+            return json.loads(candidate.read_text(encoding="utf-8"))
     raise FileNotFoundError(f"monorepo root with {rel} not found")
 
 

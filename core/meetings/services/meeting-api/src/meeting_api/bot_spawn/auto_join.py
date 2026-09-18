@@ -164,6 +164,19 @@ def _calendar_bot_name(data: dict) -> Optional[str]:
     return value.strip() if isinstance(value, str) and value.strip() else None
 
 
+def _row_bot_name(data: dict) -> Optional[str]:
+    """Resolve the bot name recorded ON the row itself: the calendar-source name first (the
+    legacy per-source naming path), else the hand-named planned row (``data.bot_name``, written
+    by POST/PATCH /meetings from the tab's Plan Meeting form). None falls through to the
+    user-wide bot context at the call site.
+    """
+    from_calendar = _calendar_bot_name(data)
+    if from_calendar:
+        return from_calendar
+    value = data.get("bot_name")
+    return value.strip() if isinstance(value, str) and value.strip() else None
+
+
 def _production_transcribe_gate() -> Optional[str]:
     """Mirror POST /bots' CC4 fail-loud STT gate: when transcription resolves ON (env default) but
     the ``stt`` capability is not configured, refuse the auto-spawn with the reason string.
@@ -321,7 +334,7 @@ async def auto_join_tick(
                 platform=row["platform"],
                 native_meeting_id=row["native_meeting_id"],
                 meeting_url=data.get("constructed_meeting_url"),
-                bot_name=_calendar_bot_name(data) or ctx.get("bot_name"),
+                bot_name=_row_bot_name(data) or ctx.get("bot_name"),
                 recording_enabled=recording_enabled,
                 transcribe_enabled=transcribe_enabled,
                 max_concurrent=ctx.get("max_concurrent"),

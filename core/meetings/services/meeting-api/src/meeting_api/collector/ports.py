@@ -91,9 +91,12 @@ class TranscriptStore(Protocol):
     async def mint_transcript_share(
         self, user_id: int, platform: str, native_meeting_id: str, *,
         mode: str = "open", allowed_emails: "Optional[list]" = None, expires_in_sec: int = 86400,
+        member_workspaces: "Optional[set[str]]" = None,
     ) -> "Optional[dict]":
-        """OWNER-scoped: mint an INDEPENDENT transcript share grant (``data.share_grants[]``, hash-at-rest).
-        Returns {id, token, ...} once, or ``None`` when the user owns no such meeting."""
+        """Mint an INDEPENDENT transcript share grant (``data.share_grants[]``, hash-at-rest).
+        Returns {id, token, ...} once, or ``None`` when no row the caller may READ addresses this
+        (platform, native) pair — the SAME three-way rule as ``authorize_subscribe``: owner OR
+        bound-workspace member (``member_workspaces``) OR redeemed transcript-share viewer."""
         ...
 
     async def mint_transcript_share_by_id(

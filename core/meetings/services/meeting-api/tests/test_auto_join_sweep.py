@@ -87,6 +87,33 @@ async def test_due_row_prefers_bot_name_from_auto_joining_calendar_source():
     assert '"botName":"Personal Bot"' in runtime.specs[0]["env"]["VEXA_BOT_CONFIG"]
 
 
+async def test_due_row_prefers_hand_named_row_bot_name_over_user_default():
+    repo, runtime = InMemoryMeetingRepo(), FakeRuntimeClient()
+    _seed(repo, data_extra={"bot_name": "Planned Row Bot"})
+
+    async def ctx(_uid):
+        return {"max_concurrent": 4, "bot_name": "User Default"}
+
+    counters = await _tick(repo, runtime, fetch_bot_context=ctx)
+    assert counters["spawned"] == 1
+    assert '"botName":"Planned Row Bot"' in runtime.specs[0]["env"]["VEXA_BOT_CONFIG"]
+
+
+async def test_calendar_source_name_still_beats_hand_named_row_bot_name():
+    repo, runtime = InMemoryMeetingRepo(), FakeRuntimeClient()
+    _seed(repo, data_extra={
+        "bot_name": "Row Bot",
+        "calendar_sources": [{"id": "work", "bot_name": "Calendar Bot"}],
+    })
+
+    async def ctx(_uid):
+        return {"max_concurrent": 4, "bot_name": "User Default"}
+
+    counters = await _tick(repo, runtime, fetch_bot_context=ctx)
+    assert counters["spawned"] == 1
+    assert '"botName":"Calendar Bot"' in runtime.specs[0]["env"]["VEXA_BOT_CONFIG"]
+
+
 async def test_not_yet_due_row_waits():
     repo, runtime = InMemoryMeetingRepo(), FakeRuntimeClient()
     _seed(repo, at=NOW + timedelta(seconds=300))  # 5 min out, lead is 60s

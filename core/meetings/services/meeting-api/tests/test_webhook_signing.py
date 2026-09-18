@@ -29,7 +29,8 @@ def _webhook_schema() -> dict:
     rel = Path("meetings") / "contracts" / "webhook.v1" / "webhook.schema.json"
     for parent in Path(__file__).resolve().parents:
         if (parent / rel).is_file():
-            return json.loads((parent / rel).read_text())
+            # JSON spec mandates UTF-8; a bare read_text() picks up the OS locale (gbk on Windows).
+            return json.loads((parent / rel).read_text(encoding="utf-8"))
     raise FileNotFoundError("webhook.v1 schema not found")
 
 

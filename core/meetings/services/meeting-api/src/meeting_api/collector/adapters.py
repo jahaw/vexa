@@ -817,26 +817,42 @@ class SqlAlchemyTranscriptStore:
                     "mode": mode, "expires_at": grant["expires_at"]}
 
     async def mint_transcript_share(self, user_id, platform, native_meeting_id, *,
-                                    mode="open", allowed_emails=None, expires_in_sec=86400) -> "Optional[dict]":
-        """OWNER-scoped: mint an INDEPENDENT transcript share grant (no workspace needed). Stored in
+                                    mode="open", allowed_emails=None, expires_in_sec=86400,
+                                    member_workspaces=None) -> "Optional[dict]":
+        """Mint an INDEPENDENT transcript share grant (no workspace needed). Stored in
         ``data.share_grants[]`` as {id, secret_hash, mode, allowed_emails, expires_at, revoked} — only the
         HASH, never the token. Returns {id, token, ...} ONCE (token = ``<meeting_id>.<secret>`` so redeem
-        resolves the meeting). None if the caller owns no such meeting.
+        resolves the meeting).
+
+        AUTHORIZATION mirrors the transcript READ, not just ownership: the SAME three-way rule as
+        ``authorize_subscribe`` / ``get_transcript_by_id`` — (a) owner, (b) member of the bound workspace
+        (``member_workspaces``, the gateway-injected x-user-workspaces set), (c) redeemed an independent
+        transcript-share link (``data.transcript_viewers``). Minting used to be owner-only while reading
+        was three-way, which stranded the exact users the feature serves: a workspace member could watch
+        the live feed yet got 404 minting the very link that onboards the rest of the team. The row is
+        resolved through ``authorize_subscribe`` (ONE authorization semantic source, pair-collision
+        scanning included) and the grant is then written by primary key under FOR UPDATE. The
+        resolve→mint gap is two statements on a low-frequency route and a grant is time-boxed, revocable
+        and transcript-read-only, so that race window is not load-bearing.
 
         Addressed by the (platform, native) PAIR, which is not a reliable identity: a row planned from
         an invite whose url no platform matched carries ``platform='unknown'`` and an EMPTY
         ``platform_specific_id``, so no pair addresses it at all (meeting 97, 2026-09-02 — every
         attendee mail for it shipped with no token). Prefer ``mint_transcript_share_by_id``; this one
         stays because 0.10 clients and the ``/transcripts/{platform}/{native}/share`` alias call it."""
+        meeting_id = await self.authorize_subscribe(
+            user_id, platform, native_meeting_id, member_workspaces=member_workspaces,
+        )
+        if meeting_id is None:
+            return None
         from sqlalchemy import select
 
         from .models import Meeting
 
+        # The id came from authorize_subscribe, so this WHERE carries no user_id on purpose —
+        # re-adding one would silently 404 the (b)/(c) branches this widening exists for.
         return await self._mint_share_on(
-            select(Meeting).where(
-                Meeting.user_id == user_id, Meeting.platform == platform,
-                Meeting.platform_specific_id == native_meeting_id,
-            ).order_by(Meeting.created_at.desc()).limit(1).with_for_update(),
+            select(Meeting).where(Meeting.id == meeting_id).with_for_update(),
             mode=mode, allowed_emails=allowed_emails, expires_in_sec=expires_in_sec)
 
     async def mint_transcript_share_by_id(self, user_id, meeting_id, *,
@@ -1183,7 +1199,8 @@ class SqlAlchemyTranscriptStore:
 
     async def create_planned_meeting(self, user_id, *, platform, native_meeting_id,
                                      title=None, scheduled_at=None, meeting_url=None,
-                                     workspace_id=None, auto_join=True, calendar_uid=None,
+                                     workspace_id=None, auto_join=True, bot_name=None,
+                                     calendar_uid=None,
                                      calendar_source=None,
                                      workspace_source=None, attendees=None,
                                      auto_join_last_attempt=None,
@@ -1204,6 +1221,10 @@ class SqlAlchemyTranscriptStore:
         data: dict = {"auto_join": bool(auto_join)}
         if title:
             data["title"] = title
+        if bot_name:
+            # hand-named bot for this row (the tab's Plan Meeting form) — the auto-join sweep
+            # reads it back when dispatching, ahead of the user-wide default
+            data["bot_name"] = bot_name
         if scheduled_at:
             data["scheduled_at"] = scheduled_at
         if meeting_url:
@@ -1549,6 +1570,12 @@ class SqlAlchemyTranscriptStore:
                     data["auto_join_user_set"] = True
                 else:
                     data.pop("auto_join_user_set", None)
+            if "bot_name" in updates:
+                # empty string clears a previously set name (same semantics as `title` above)
+                if updates["bot_name"]:
+                    data["bot_name"] = updates["bot_name"]
+                else:
+                    data.pop("bot_name", None)
             if "calendar_uid" in updates:
                 if updates["calendar_uid"]:
                     data["calendar_uid"] = updates["calendar_uid"]
