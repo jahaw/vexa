@@ -11,6 +11,9 @@ Id formats (mirrors the dashboard join-form):
   * google_meet → ``abc-defg-hij``
   * zoom        → 9–11 digits
   * teams       → the ``19:meeting_…@thread.v2`` thread id, or the ``/meet/<id>`` short-link segment
+                   （兼容注：thread id 允许 ``19:`` 与 ``meeting_`` 之间存在一段 1–64 位
+                   租户中段，如 ``19:gal:meeting_…@thread.v2``——中国区/世纪互联租户的
+                   新版深链形态，详见下方 _TEAMS_THREAD 处的中文说明）
   * jitsi       → the room name (the URL's path segment). Hosts: meet.jit.si and
                   ``VEXA_JITSI_HOSTS``-declared deployments always; *jitsi* / meet-labelled
                   hosts on pasted links only. The room name is deployment-scoped, so the raw
@@ -30,7 +33,19 @@ _ZOOM_ID = re.compile(r"\d{9,11}")
 # is retried at the next one — quadratic in the input length on a string an attacker chooses
 # (CodeQL py/polynomial-redos). A Teams thread id is a fixed-shape base64ish blob well under
 # 256 characters, so the cap costs nothing and makes the scan linear-bounded.
-_TEAMS_THREAD = re.compile(r"19:meeting_[^@%\s/]{1,256}@thread\.v2", re.IGNORECASE)
+#
+# 【旧版深链·租户中段兼容】新版 Teams 深链的 thread id 在 `19:` 与 `meeting_` 之间存在一个
+# 可选的租户中段（如 `19:gal:meeting_…@thread.v2`，gal 为租户标记，中国区/世纪互联租户常见）。
+# 原字面量 `19:meeting_` 无法匹配该形态 → parse_meeting_url 返回 None → POST /meetings（计划
+# 会议）/PATCH/calendar_sync 统一 422 "unrecognized 'meeting_url'"，预定会议创建即失败、到点
+# 自然无法入会；而"添加 Bot"链路因前端随请求携带完整深链（meeting_url 原样直达）不经此处
+# 解析，故不受影响——这正是"同一链接两条链路行为不一致"的唯一根因。
+# 放宽为 `19:` 后允许一段 1–64 位字母数字中段（`{1,64}` 上界维持有界回溯，与上方 ReDoS 防护
+# 同一口径）；group(0) 仍为完整 thread id（含中段），与前端 lib/meeting-input.ts 的解析结果
+# （decode + split 取首段）一致，保证两条链路的 (platform, native_meeting_id) 主键可互认。
+# 【误报边界】`@thread.v2` 锚点与 `[^@%\s/]` 排除集均不变：频道会议 id（`19:频道名@thread.tacv2`）
+# 仍不匹配，不会被误认；域名白名单的精确匹配逻辑不受影响。
+_TEAMS_THREAD = re.compile(r"19:(?:[a-z0-9]{1,64}:)?meeting_[^@%\s/]{1,256}@thread\.v2", re.IGNORECASE)
 _TEAMS_SHORT = re.compile(r"/meet/([^/?#]+)", re.IGNORECASE)
 # A Jitsi room is the URL path's single segment; permissive by design (jitsi accepts nearly any
 # room string) but excludes separators/whitespace so a mangled URL never yields a bogus room.

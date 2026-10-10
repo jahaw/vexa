@@ -219,3 +219,44 @@ class TestTeamsThreadIdIsBounded:
         start = time.monotonic()
         assert parse_meeting_url(f"https://teams.microsoft.com/l/meetup-join/{payload}") is None
         assert time.monotonic() - start < 2.0
+
+
+class TestTeamsThreadTenantSegment:
+    """【旧版深链·租户中段兼容】新版 Teams 深链的 thread id 在 ``19:`` 与 ``meeting_`` 之间
+    存在一段租户中段（``19:gal:meeting_…@thread.v2``，中国区/世纪互联租户常见）。该形态此前
+    无法被识别 → POST /meetings（计划会议）统一 422 "unrecognized 'meeting_url'"，预定会议
+    创建即失败、到点自然无法入会；而"添加 Bot"链路因前端携带完整深链（meeting_url 原样直达）
+    不经服务端解析，不受影响——两条链路行为不一致的唯一根因即此。回归锁定：识别结果为完整
+    thread id（含中段），与前端 lib/meeting-input.ts 的解析口径一致。"""
+
+    def test_china_cloud_tenant_segment_deep_link_parses(self):
+        # 用户实测报障的原始链接（中国区域名 + percent-encoded thread id，含 gal: 租户中段）
+        url = (
+            "https://teams.microsoftonline.cn/l/meetup-join/"
+            "19%3agal%3ameeting_fdf65fc8cb8d43c5bf6407bec5c998a8%40thread.v2/0"
+            "?context=%7b%22Tid%22%3a%226ce77474-4394-4c4c-889c-193827a4c1fb%22%2c"
+            "%22Oid%22%3a%22f8429c18-cd88-4e69-88cf-cc6e09027e1a%22%7d"
+        )
+        assert parse_meeting_url(url) == (
+            "teams",
+            "19:gal:meeting_fdf65fc8cb8d43c5bf6407bec5c998a8@thread.v2",
+        )
+
+    def test_classic_thread_id_still_parses_unchanged(self):
+        # 经典形态（无租户中段）回归：group(0) 提取口径不变
+        assert parse_meeting_url(
+            "https://teams.microsoft.com/l/meetup-join/19:meeting_AbCd@thread.v2"
+        ) == ("teams", "19:meeting_AbCd@thread.v2")
+
+    def test_channel_style_id_is_still_not_a_meeting(self):
+        # 频道会议 id（19:<频道名>@thread.tacv2）不含 meeting_，仍不识别（无误报扩散）
+        assert parse_meeting_url(
+            "https://teams.microsoft.com/l/meetup-join/19:channel@thread.tacv2/0"
+        ) is None
+
+    def test_spoofed_host_with_tenant_segment_is_still_rejected(self):
+        # 域名白名单逻辑不受放宽影响：仿冒域名上的深链仍拒绝
+        assert parse_meeting_url(
+            "https://teams.live.com.evil.example/l/meetup-join/19:gal:meeting_AbCd@thread.v2"
+        ) is None
+

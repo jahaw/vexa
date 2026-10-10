@@ -269,6 +269,11 @@ def test_parse_meeting_url_formats():
     assert parse_meeting_url(
         "https://teams.microsoft.com/l/meetup-join/19%3ameeting_YWJj%40thread.v2/0"
     ) == ("teams", "19:meeting_YWJj@thread.v2")
+    # 【旧版深链·租户中段兼容】中国区 gal: 中段形态可解析为完整 thread id（详见
+    # meeting_link._TEAMS_THREAD 处的中文说明；native id 与"添加 Bot"链路口径一致）
+    assert parse_meeting_url(
+        "https://teams.microsoftonline.cn/l/meetup-join/19%3agal%3ameeting_YWJj%40thread.v2/0"
+    ) == ("teams", "19:gal:meeting_YWJj@thread.v2")
     assert parse_meeting_url("https://teams.microsoft.com/meet/9351274713?p=abc") == ("teams", "9351274713")
     assert parse_meeting_url("https://example.com/whatever") is None
     assert parse_meeting_url("") is None
