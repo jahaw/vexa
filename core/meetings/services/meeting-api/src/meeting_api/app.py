@@ -865,6 +865,26 @@ def _mount_lifecycle(
                         log_event("user_meeting_status_publish_failed", audience="system",
                                   level="warning", span="lifecycle.callback",
                                   fields={"error": str(e)})
+                # 【入会问候需求】bot FSM 前进到 active(入会成功)的这一次事件里,把会前
+                # 配置的问候语(greeting,bot_spawn 时持久化进 meeting.data)以 acts.v1
+                # chat_send 形态发布到 bot_commands:meeting:{id} —— 与停止指令同一条命令
+                # 总线,bot 端 ChatController 在会议 chat 输入框发送。外层已过滤 no_op
+                # (幂等重放不会重复问候);发布失败仅告警,绝不影响回调主流程。
+                if rec.status.value == "active":
+                    greeting = (meeting_row.get("data") or {}).get("greeting")
+                    if isinstance(greeting, str) and greeting.strip():
+                        try:
+                            await redis.publish(
+                                f"bot_commands:meeting:{meeting_id}",
+                                _json.dumps({"action": "chat_send", "text": greeting}),
+                            )
+                            log_event("bot_greeting_published", audience="system",
+                                      span="lifecycle.callback",
+                                      fields={"meeting_id": meeting_id})
+                        except Exception as e:  # noqa: BLE001 — 问候是 best-effort
+                            log_event("bot_greeting_publish_failed", audience="system",
+                                      level="warning", span="lifecycle.callback",
+                                      fields={"error": str(e), "meeting_id": meeting_id})
         # COPILOT REAP (Bug 3): the moment a meeting lands TERMINAL, emit the `session_end` marker onto
         # the meeting copilot transcript feed — the EXACT stream the meeting copilot worker
         # (agent worker/meeting.py, via VEXA_TRANSCRIPT_STREAM) blocks on. The worker reaps immediately

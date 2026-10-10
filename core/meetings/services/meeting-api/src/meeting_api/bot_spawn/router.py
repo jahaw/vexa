@@ -470,6 +470,9 @@ def build_router(
                 recording_enabled=_resolve_recording_enabled(body.get("recording_enabled")),
                 transcribe_enabled=transcribe_enabled,
                 automatic_leave=_resolve_automatic_leave(body.get("automatic_leave")),
+                # 【入会问候需求】会前问候语(可选):bot 入会成功(active)后自动发到会议 chat。
+                # 仅作透传,校验与持久化在 request_bot 内完成(落 meeting.data,不入 invocation)。
+                greeting=body.get("greeting"),
                 # P3c — continue_meeting is accepted off the OPEN api.v1 request body (MeetingCreate
                 # has no additionalProperties:false), so the wire is not rejected; documenting it as
                 # a public typed field needs a vN+1 (lane:contract) — see the bot_spawn README.

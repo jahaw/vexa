@@ -415,6 +415,10 @@ async def request_bot(
     passcode: Optional[str] = None,
     meeting_url: Optional[str] = None,
     teams_base_host: Optional[str] = None,
+    # 【入会问候需求】可选问候语:bot 入会成功(active)后自动发到会议 chat。只在
+    # meeting.data 里持久化(生命周期回调在 active 转换点读取并发 chat_send),
+    # 不进 invocation —— 问候是"会前配置的一次性文案",不是 bot 运行时参数。
+    greeting: Optional[str] = None,
     language: Optional[str] = None,
     task: Optional[str] = None,
     transcription_tier: str = "realtime",
@@ -658,6 +662,13 @@ async def request_bot(
         "teardown_confirmed": False,
     }
 
+    # 【入会问候需求】问候语规范化:去首尾空白、限长 500(超出截断)、空串归一为 None。
+    # 宽松处理(不因 greeting 报错)—— 问候是锦上添花,绝不能挡住入会这个主产品。
+    if isinstance(greeting, str):
+        greeting = greeting.strip()[:500] or None
+    else:
+        greeting = None
+
     if reused_row is not None:
         # continue_meeting reopens an EXISTING terminal row (no new active row inserted), so it is not
         # part of the fresh-insert TOCTOU window — but the per-user cap still applies (a continued run
@@ -684,6 +695,9 @@ async def request_bot(
                 "recording_enabled": recording_enabled,
                 "transcription_provider": transcription_provider,
                 "service_authority": authority_record,
+                # 【入会问候需求】续会重开时,本次请求带问候语则覆盖(新的运行用新问候);
+                # 未带则保留原值,不清除。
+                **({"greeting": greeting} if greeting else {}),
             },
         )
     else:
@@ -710,6 +724,10 @@ async def request_bot(
                 meeting_data["webhook_secret"] = webhook_secret
             if webhook_events:
                 meeting_data["webhook_events"] = webhook_events
+        # 【入会问候需求】问候语随会议行持久化(已在入口规范化):生命周期回调在 bot
+        # 进入 active 的转换点读取它,向命令总线发一次 chat_send。
+        if greeting:
+            meeting_data["greeting"] = greeting
         try:
             row = await repo.create_meeting_guarded(
                 user_id=user_id,

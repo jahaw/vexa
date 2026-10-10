@@ -36,6 +36,8 @@ import { createCaptureSignalRecorder, startBotLogSidecar, wrapTranscribeWithTap,
 import { uploadSignalTapes } from './signal-upload.js';
 import { createSttFaultReporter } from './stt-faults.js';
 import { launchBrowser, startCaptureBridge, startRecording, restartMixedCapture, createSpeakController, type BrowserSession, type SpeakController } from './capture-bridge.js';
+// 【入会问候需求】chat_send 的 bot 端执行体(会议 chat 输入框发送,SpeakController 镜像件)
+import { createChatController, type ChatController } from './chat-send.js';
 import { createRemoteAudioActivityTap, createSilenceAlonenessSource, resolveAloneSilenceWindowMs } from './aloneness.js';
 import { installSignalHandlers } from './signals.js';
 import type {
@@ -105,12 +107,19 @@ function deriveMaxActiveMs(inv: Invocation, everyoneLeftMs: number, env: NodeJS.
  * wired here at the composition root. The orchestrator's `subscribe(handler)` registers its
  * handler; we fan the live source's messages to it plus `voice`.
  */
-function teeActs(source: ActsSource, voice: (act: Act) => void | Promise<void>): ActsSource {
+function teeActs(
+  source: ActsSource,
+  ...sides: Array<(act: Act) => void | Promise<void>>
+): ActsSource {
   return {
     subscribe(handler) {
       return source.subscribe((act) => {
         void Promise.resolve(handler(act)).catch((e) => console.error(`[bot] acts: orchestrator handler rejected: ${String(e)}`));
-        void Promise.resolve(voice(act)).catch((e) => console.error(`[bot] acts: voice handler rejected: ${String(e)}`));
+        // 【入会问候需求】tee 改为变参 side 处理器列表:每条 act 除 orchestrator 外,
+        // 逐一送达所有 side(voice / chat),各自隔离失败 —— 单一底层订阅不变。
+        for (const side of sides) {
+          void Promise.resolve(side(act)).catch((e) => console.error(`[bot] acts: side handler rejected: ${String(e)}`));
+        }
       });
     },
   };
@@ -122,6 +131,14 @@ function voiceHandler(speak: SpeakController): (act: Act) => Promise<void> {
   return async (act) => {
     if (act.action === 'speak') await speak.speak(act.text, act.voice);
     else if (act.action === 'speak_stop') await speak.stop();
+  };
+}
+
+/** 【入会问候需求】bot 的 chat-act 处理器:acts.v1 `chat_send` → ChatController(会议 chat
+ *  输入框发送文本)。`chat_read`(读取收件箱)不在本增量范围 —— 静默忽略。 */
+function chatHandler(chat: ChatController): (act: Act) => Promise<void> {
+  return async (act) => {
+    if (act.action === 'chat_send') await chat.send(act.text);
   };
 }
 
@@ -296,7 +313,11 @@ export async function main(env: NodeJS.ProcessEnv = process.env): Promise<number
     });
     // Voice: tee acts so `speak`/`speak_stop` reach the SpeakController (gated on voiceAgentEnabled).
     const speak = createSpeakController(session.page, inv);
-    acts = teeActs(liveActs, voiceHandler(speak));
+    // 【入会问候需求】chat 并联进同一 tee:`chat_send` → ChatController 在会议 chat 输入框
+    // 发送(问候语由 meeting-api 在 active 转换点发布到命令总线)。chat 不设 voiceAgentEnabled
+    // 门 —— 问候独立于语音助手开关,没发 act 就没有副作用。
+    const chat = createChatController(session.page, inv);
+    acts = teeActs(liveActs, voiceHandler(speak), chatHandler(chat));
   } catch (e) {
     console.error(`[bot] browser launch/capture wiring failed — falling back to clean terminal failed: ${String(e)}`);
     join = noBrowserJoinDriver(String(e));
